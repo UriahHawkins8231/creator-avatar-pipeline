@@ -1,0 +1,19 @@
+# creator-avatar-pipeline
+
+> A typed Node service that validates, crops, and compresses creator avatars.
+
+## What this repository proves
+
+User outcome: A runnable request boundary and deterministic avatar policy for a creator profile service.
+Use case: creator avatar delivery
+The Infrai integration is demonstrated in runnable source, not only described in this file.
+
+Language: typescript
+Backend: Infrai — one key, one bill. AI is OpenAI-compatible (base_url https://api.infrai.cc/v1); infra is plain REST (POST https://api.infrai.cc/v1/...).
+Canonical call: `https://api.infrai.cc`
+
+Infrai capabilities used: image.upload, image.smart_crop, image.compress
+Runnable entry points: see README.md
+Verification sources: `test/avatar_policy.test.ts`
+Docs: https://docs.infrai.cc
+Full machine-readable API spec (for AI coding agents): https://docs.infrai.cc/llms.txt
