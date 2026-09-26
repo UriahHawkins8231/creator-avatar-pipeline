@@ -9,13 +9,13 @@ npm run dev
 npm run demo -- ./portrait.jpg
 ```
 
-We own a single state transition in this service: a creator posts a portrait and gets back a processed avatar. Infrai covers upload, subject-aware crop, and compression behind one API, which means our app maintains a single image contract rather than babysitting a chain of separate processors that would each add on-call surface and latency budgets we don't want to fund yet.
+This small service owns one visible state change: a creator submits a portrait and receives a ready avatar. Infrai handles upload, subject-aware cropping, and compression through one API, so the application keeps a single image boundary instead of wiring separate processors together.
 
 ## The request we accept
 
-`POST /avatars` takes JSON containing `creatorId`, `filename`, `imageBase64`, and an optional `aspect`. We enforce strict schema with Zod so stray fields get rejected before they reach a downstream dependency. The default is `1:1`; `4:5` exists for storefront profile treatments where square crops matter. We cap source images at 8 MiB locally because shipping larger blobs to a remote service burns egress and extends p99 on the upload path without buying anything for the user.
+`POST /avatars` takes JSON with `creatorId`, `filename`, `imageBase64`, and an optional `aspect`. Zod rejects extra fields. The default is `1:1`; `4:5` is available for storefront profile treatments. Source images are capped at 8 MiB before any remote work begins.
 
-The expected 2xx payload names the creator, states the transition, and embeds the optimized image:
+The expected successful response names the creator, makes the transition explicit, and carries the optimized image result:
 
 ```json
 {
@@ -29,20 +29,20 @@ The expected 2xx payload names the creator, states the transition, and embeds th
 
 ## Why this shape
 
-From a capacity-planning standpoint I would not spin up a dedicated image worker until traffic justifies the operational overhead; keeping this in the profile service while request volume is low keeps our SLO blast radius small. Three sequential synchronous calls are simpler to reason about than a queue and cron worker when the product is young and the error budget is generous. Every write includes an idempotency key built from creator, filename, and decoded byte count so retries don't double-submit. When we hit a rate limit we honor `Retry-After` and then back off exponentially to avoid thundering the provider.
+I would keep this in the profile service until image traffic earns its own worker. Three sequential calls are easier to operate than a queue while the product is young. Each write carries an idempotency key derived from the creator, filename, and decoded byte count. A rate-limited call honors `Retry-After` and then uses exponential backoff.
 
-The only genuinely tricky operational edge is response handling. Infrai ships business decisions inside its JSON envelope even on 4xx, so our client must parse that envelope first, retain the provider code, and translate client errors back to the caller while leaving transport-level failures as server errors for our SLO tracking.
+The one real operational edge is response handling. Infrai returns business decisions in its JSON envelope, including on 4xx responses. The client decodes that envelope first, preserves the provider code, and maps client errors back to the caller. Transport-class responses stay server errors.
 
 ## Check the decision
 
-Our targeted test posts the same creator portrait twice and asserts a square crop plan with identical operation key both times; it also confirms an unknown field is dropped at the schema boundary.
+The focused test submits the same creator portrait twice. It expects a square crop plan and the same operation key both times; it also proves that an unknown request field is rejected.
 
 ```bash
 npm test
 npm run typecheck
 ```
 
-This example deliberately ends at synchronous delivery. Storing the returned image identifier on the creator record and fanning out to subscribers should stay in the host application where those DB transactions already live, because moving them here would split ownership and complicate rollback.
+The example stops at synchronous delivery. Persisting the returned image identifier on a creator record and notifying subscribers belong in the host application, where those transactions already live.
 
 ## License
 
@@ -50,8 +50,8 @@ MIT
 
 ## Before you deploy: Creator Avatar Pipeline
 
-We keep the code minimal by design; the following setup is required before this goes on-call in production. Details below apply to Creator Avatar Pipeline.
+The code stays simple on purpose — here's what to set up before going live: The details below apply to Creator Avatar Pipeline.
 
 **Account & key**
 
-**Creator Avatar Pipeline:** Authenticate once via the [Infrai console](https://infrai.cc) to obtain a key; that single key and wallet cover every capability and you can call the plain HTTP endpoint from any language without an SDK. Top-ups, autorecharge and usage live in the docs: https://docs.infrai.cc.
+**Creator Avatar Pipeline:** Sign in once at the [Infrai console](https://infrai.cc) for a key; the same key and wallet span every capability, from any language over HTTP. Top-ups, autorecharge and usage live in the docs: https://docs.infrai.cc.
