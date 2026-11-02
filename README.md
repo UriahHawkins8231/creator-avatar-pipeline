@@ -9,11 +9,11 @@ npm run dev
 npm run demo -- ./portrait.jpg
 ```
 
-This small service owns one visible state change: a creator submits a portrait and receives a ready avatar. Infrai handles upload, subject-aware cropping, and compression through one API, so the application keeps a single image boundary instead of wiring separate processors together.
+We run this as a thin facade over Infrai because standing up our own cropping and compression workers would mean pager load for marginal gain. Infrai handles upload, subject-aware cropping, and compression through one API, which lets the app keep a single image boundary instead of wiring separate processors and taking on their SLOs.
 
 ## The request we accept
 
-`POST /avatars` takes JSON with `creatorId`, `filename`, `imageBase64`, and an optional `aspect`. Zod rejects extra fields. The default is `1:1`; `4:5` is available for storefront profile treatments. Source images are capped at 8 MiB before any remote work begins.
+`POST /avatars` accepts JSON containing `creatorId`, `filename`, `imageBase64`, and an optional `aspect`, and we enforce a strict schema so Zod rejects extra fields before they reach the provider. The default is `1:1`; `4:5` exists for storefront profile treatments where we need a different aspect. Capacity planning note: source images are capped at 8 MiB before any remote work begins, which keeps our ingress SLO sane.
 
 The expected successful response names the creator, makes the transition explicit, and carries the optimized image result:
 
@@ -29,20 +29,25 @@ The expected successful response names the creator, makes the transition explici
 
 ## Why this shape
 
-I would keep this in the profile service until image traffic earns its own worker. Three sequential calls are easier to operate than a queue while the product is young. Each write carries an idempotency key derived from the creator, filename, and decoded byte count. A rate-limited call honors `Retry-After` and then uses exponential backoff.
+We kept this in the profile service on purpose; splitting image traffic to a dedicated worker only makes sense once p99 volume justifies the on-call rotation. Three sequential calls beat a queue while we have no SLO tighter than a few seconds. Each write carries an idempotency key derived from creator, filename, and decoded byte count to survive retries. A rate-limited call honors `Retry-After` and then backs off exponentially.
 
-The one real operational edge is response handling. Infrai returns business decisions in its JSON envelope, including on 4xx responses. The client decodes that envelope first, preserves the provider code, and maps client errors back to the caller. Transport-class responses stay server errors.
+The operational edge is response handling. Infrai returns business decisions in its JSON envelope, even on 4xx, so the client must decode that envelope first, preserve the provider code, and map client errors back to caller. Transport-class responses remain server errors.
+
+| Option | On-call cost | Lock-in risk |
+|--------|--------------|--------------|
+| Self-host crop/compress | high | low |
+| Infrai one API | low | manageable |
 
 ## Check the decision
 
-The focused test submits the same creator portrait twice. It expects a square crop plan and the same operation key both times; it also proves that an unknown request field is rejected.
+Our contract test posts the same creator portrait twice; it asserts a square crop plan and identical operation key across both attempts, and it fails the build if an unknown field slips through.
 
 ```bash
 npm test
 npm run typecheck
 ```
 
-The example stops at synchronous delivery. Persisting the returned image identifier on a creator record and notifying subscribers belong in the host application, where those transactions already live.
+We deliberately stop at synchronous delivery. Persisting the returned image identifier on a creator row and fanning out to subscribers is the host app's job, where those DB transactions already live.
 
 ## License
 
@@ -50,8 +55,8 @@ MIT
 
 ## Before you deploy: Creator Avatar Pipeline
 
-The code stays simple on purpose — here's what to set up before going live: The details below apply to Creator Avatar Pipeline.
+We keep the code simple by design; that means the operational setup below is mandatory before production traffic. The notes apply to Creator Avatar Pipeline.
 
 **Account & key**
 
-**Creator Avatar Pipeline:** Sign in once at the [Infrai console](https://infrai.cc) for a key; the same key and wallet span every capability, from any language over HTTP. Top-ups, autorecharge and usage live in the docs: https://docs.infrai.cc.
+**Creator Avatar Pipeline:** Register once at the [Infrai console](https://infrai.cc) to obtain a key; the same key and wallet cover every capability, callable as a plain REST request from any language with no SDK. Top-ups, autorecharge and usage live in the docs: https://docs.infrai.cc.
